@@ -12,14 +12,14 @@ import { buildSlotsForDoctor, formatTime12h, todayValue, formatArDateLong, weekd
 const STATUS_META: Record<AppointmentStatus, { label: string; tone: 'slate' | 'teal' | 'amber' | 'rose' | 'sky' | 'emerald' | 'violet' }> = {
   pending:     { label: 'في الانتظار', tone: 'slate' },
   confirmed:   { label: 'مؤكد',       tone: 'sky' },
-  in_progress: { label: 'في الكشف',   tone: 'amber' },
+  in_progress: { label: 'في الكشف',    tone: 'amber' },
   completed:   { label: 'مكتمل',      tone: 'emerald' },
   cancelled:   { label: 'ملغي',       tone: 'rose' },
   no_show:     { label: 'لم يحضر',    tone: 'violet' },
 };
 
 function exportToExcel(appts: Appointment[], dateStr: string) {
-  const headers = ['#', 'اسم المريض', 'الهاتف', 'رقم الهوية', 'الطبيب', 'التخصص', 'الوقت', 'الحالة', 'الغرفة'];
+  const headers = ['#', 'اسم المريض', 'الهاتف', 'رقم الهوية', 'الطبيب', 'التخصص', 'التاريخ', 'الوقت', 'الحالة', 'الغرفة'];
   const rows = appts.map((a) => [
     a.turn_number,
     a.patient?.name ?? '',
@@ -27,6 +27,7 @@ function exportToExcel(appts: Appointment[], dateStr: string) {
     a.patient?.national_id ?? '',
     `${a.doctor?.title ?? ''} ${a.doctor?.name ?? ''}`.trim(),
     a.specialty?.name ?? '',
+    a.appointment_date ?? '',
     formatTime12h(a.appointment_time),
     STATUS_META[a.status].label,
     a.doctor?.room ?? '',
@@ -54,6 +55,7 @@ function printAppointments(appts: Appointment[], dateStr: string) {
       <td>${a.patient?.phone ?? ''}</td>
       <td>${a.doctor?.title ?? ''} ${a.doctor?.name ?? ''}</td>
       <td>${a.specialty?.name ?? ''}</td>
+      <td>${a.appointment_date ?? ''}</td>
       <td>${formatTime12h(a.appointment_time)}</td>
       <td>${STATUS_META[a.status].label}</td>
     </tr>`).join('');
@@ -71,7 +73,7 @@ function printAppointments(appts: Appointment[], dateStr: string) {
     <h1>تقرير مواعيد العيادة</h1>
     <p class="date">${dateStr}</p>
     <table><thead><tr>
-      <th>#</th><th>المريض</th><th>الهاتف</th><th>الطبيب</th><th>التخصص</th><th>الوقت</th><th>الحالة</th>
+      <th>#</th><th>المريض</th><th>الهاتف</th><th>الطبيب</th><th>التخصص</th><th>التاريخ</th><th>الوقت</th><th>الحالة</th>
     </tr></thead><tbody>${rows}</tbody></table>
     </body></html>`);
   win.document.close();
@@ -80,12 +82,13 @@ function printAppointments(appts: Appointment[], dateStr: string) {
 }
 
 export function Reception() {
-  const [date, setDate] = useState<string>(todayValue());
+  // يبدأ الحقل فارغاً تلقائياً ليظهر كل الحجوزات لكل الأيام
+  const [date, setDate] = useState<string>(''); 
   const [filterStatus, setFilterStatus] = useState<AppointmentStatus | 'all'>('all');
   const [search, setSearch] = useState('');
   const [bookOpen, setBookOpen] = useState(false);
 
-  const { items, loading, refresh } = useAppointments({ date });
+  const { items, loading, refresh } = useAppointments(date ? { date } : {});
 
   const filtered = useMemo(() => {
     let list = items;
@@ -128,9 +131,11 @@ export function Reception() {
         <div className="flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <ClipboardList className="w-5 h-5 text-hospital-600" /> الاستقبال — إدارة مواعيد اليوم
+              <ClipboardList className="w-5 h-5 text-hospital-600" /> الاستقبال — إدارة المواعيد
             </h2>
-            <p className="text-xs text-slate-500 mt-1">{formatArDateLong(date)}</p>
+            <p className="text-xs text-slate-500 mt-1">
+              {date ? `عرض مواعيد تاريخ: ${formatArDateLong(date)}` : 'عرض جميع المواعيد المسجلة (لكل الأيام)'}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             <div className="relative">
@@ -142,16 +147,27 @@ export function Reception() {
                 className={`${inputCls} ps-9 w-64`}
               />
             </div>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className={`${inputCls} w-40`}
-            />
-            <Button variant="outline" size="md" onClick={() => printAppointments(filtered, formatArDateLong(date))} disabled={loading || filtered.length === 0}>
+            
+            {/* حقل التاريخ يبدأ فارغاً ويسمح للمستخدم باختيار يوم متى أراد */}
+            <div className="flex items-center gap-1">
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={`${inputCls} w-36`}
+                title="اختر يوماً محدداً أو اتركه فارغاً للكل"
+              />
+              {date && (
+                <Button variant="ghost" size="sm" onClick={() => setDate('')} title="إلغاء فلتر التاريخ وعرض الكل">
+                  إلغاء
+                </Button>
+              )}
+            </div>
+
+            <Button variant="outline" size="md" onClick={() => printAppointments(filtered, date ? formatArDateLong(date) : 'جميع التواريخ')} disabled={loading || filtered.length === 0}>
               <Printer className="w-4 h-4" /> طباعة
             </Button>
-            <Button variant="outline" size="md" onClick={() => exportToExcel(filtered, date)} disabled={loading || filtered.length === 0}>
+            <Button variant="outline" size="md" onClick={() => exportToExcel(filtered, date || 'all_dates')} disabled={loading || filtered.length === 0}>
               <FileSpreadsheet className="w-4 h-4" /> تصدير Excel
             </Button>
             <Button onClick={() => setBookOpen(true)}><UserPlus className="w-4 h-4" /> حجز يدوي</Button>
@@ -194,7 +210,7 @@ export function Reception() {
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<CalendarDays className="w-7 h-7" />}
-            title={items.length === 0 ? 'لا توجد مواعيد في هذا اليوم' : 'لا نتائج مطابقة'}
+            title={items.length === 0 ? 'لا توجد مواعيد مسجلة' : 'لا نتائج مطابقة'}
             subtitle={items.length === 0 ? 'استخدم زر «حجز يدوي» لإضافة موعد جديد.' : 'جرّب تغيير الفلاتر أو البحث.'}
           />
         ) : (
@@ -267,6 +283,11 @@ function ReceptionRow({
           <div className="flex items-center gap-2 flex-wrap">
             <h4 className="font-bold text-slate-800 truncate">{appt.patient?.name ?? '—'}</h4>
             <Badge tone={meta.tone}>{meta.label}</Badge>
+            {appt.appointment_date && (
+              <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
+                📅 {appt.appointment_date}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500 mt-1">
             <span className="inline-flex items-center gap-1">
@@ -394,7 +415,6 @@ function ManualBookingModal({
     });
     setSubmitting(false);
     if (err) { setError(err); return; }
-    // reset
     setSpecialty(null); setDoctor(null); setTime(''); setPatient({ name: '', phone: '', national_id: '', gender: '', birth_year: '' });
     onBooked();
   }
@@ -402,7 +422,6 @@ function ManualBookingModal({
   return (
     <Modal open={open} onClose={onClose} title="حجز موعد يدوي" maxWidth="max-w-2xl">
       <div className="space-y-4">
-        {/* Specialty */}
         <Field label="التخصص" required>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {specialties.map((s) => {
@@ -424,7 +443,6 @@ function ManualBookingModal({
           </div>
         </Field>
 
-        {/* Doctor */}
         <Field label="الطبيب" required>
           <select
             value={doctor?.id ?? ''}
@@ -438,7 +456,6 @@ function ManualBookingModal({
           </select>
         </Field>
 
-        {/* Date & time */}
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="اليوم" required>
             <input type="date" value={date} min={todayValue()} onChange={(e) => { setDate(e.target.value); setTime(''); }} className={inputCls} />
