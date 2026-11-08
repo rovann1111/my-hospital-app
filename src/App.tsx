@@ -37,6 +37,23 @@ function AppInner() {
   const [route, setRouteState] = useState<Route>(() => routeFromHash());
   const [loginOpen, setLoginOpen] = useState(false);
 
+  // Dark / Light mode state with persistence online/local
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('sal_dark_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sal_dark_mode', String(darkMode));
+    } catch {
+      /* ignore */
+    }
+  }, [darkMode]);
+
   // Sync route <-> hash. When the hash changes (back/forward), update state.
   useEffect(() => {
     const onHash = () => setRouteState(routeFromHash());
@@ -81,18 +98,37 @@ function AppInner() {
   const effectiveRoute: Route = isStaffRoute(route) && user ? route : isPublicRoute(route) ? route : 'booking';
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
+    <div className={`min-h-screen flex flex-col transition-colors duration-200 ${darkMode ? 'bg-slate-900 text-slate-100 dark' : 'bg-slate-50 text-slate-800'}`}>
+      {/* شريط الأزرار العلوي للوضع الليلي والنهاري */}
+      <div className={`w-full px-4 py-2 border-b flex items-center justify-end gap-2 text-xs ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
+        <span>تفضيل المظهر:</span>
+        <button
+          onClick={() => setDarkMode(false)}
+          className={`px-3 py-1 rounded-md font-medium transition-all flex items-center gap-1 ${!darkMode ? 'bg-white shadow text-emerald-700 font-bold' : 'hover:bg-slate-700'}`}
+        >
+          ☀️ نهارى
+        </button>
+        <button
+          onClick={() => setDarkMode(true)}
+          className={`px-3 py-1 rounded-md font-medium transition-all flex items-center gap-1 ${darkMode ? 'bg-slate-700 shadow text-amber-300 font-bold' : 'hover:bg-slate-200'}`}
+        >
+          🌙 ليلى
+        </button>
+      </div>
+
       <Header route={effectiveRoute} setRoute={setRoute} onStaffLogin={() => setLoginOpen(true)} />
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+      
+      <main className={`flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 ${darkMode ? 'text-slate-100' : ''}`}>
         {effectiveRoute === 'booking' && <PatientBooking />}
         {effectiveRoute === 'lookup' && <PatientLookup />}
         {effectiveRoute === 'reception' && user && <Reception />}
         {effectiveRoute === 'doctor' && user && <DoctorClinic />}
         {effectiveRoute === 'admin' && user && <Admin />}
       </main>
-      <footer className="border-t border-slate-100 bg-white">
-        <div className="max-w-7xl mx-auto px-4 py-4 text-center text-xs text-slate-400">
-          مستشفى السلام التخصصي — نظام حجز وإدارة العيادات الخارجية © {new Date().getFullYear()}
+
+      <footer className={`border-t ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-100 text-slate-400'}`}>
+        <div className="max-w-7xl mx-auto px-4 py-4 text-center text-xs">
+          مستشفى السلام التخصصي — نظام حجز وإدارة العيادات الخارجية © 2026 Dev Shrehan M
         </div>
       </footer>
 
