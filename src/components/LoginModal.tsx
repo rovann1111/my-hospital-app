@@ -83,6 +83,10 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
             {busy ? 'جاري التحقق...' : <><LogIn className="w-4 h-4" /> تسجيل الدخول</>}
           </Button>
         </form>
+      </div>
+    </Modal>
+  );
+}
 
 // Small inline trigger button used in the header for staff access.
 export function StaffLoginButton({ onClick }: { onClick: () => void }) {
