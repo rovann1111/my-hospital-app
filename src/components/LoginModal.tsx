@@ -84,7 +84,6 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
           </Button>
         </form>
 
- 
 // Small inline trigger button used in the header for staff access.
 export function StaffLoginButton({ onClick }: { onClick: () => void }) {
   return (
