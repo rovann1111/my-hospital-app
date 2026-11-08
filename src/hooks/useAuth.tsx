@@ -41,7 +41,7 @@ function clearSession(): void {
   }
 }
 
-// Default fallback super-admin user so you can log in immediately
+// Default fallback super-admin user so shery/shery123 always works instantly
 const DEFAULT_SUPER_ADMIN: StaffUser = {
   id: 'super-admin-shery',
   username: 'shery',
@@ -57,10 +57,13 @@ const DEFAULT_SUPER_ADMIN: StaffUser = {
 export const staffStorage = {
   async list(): Promise<StaffUser[]> {
     const { data, error } = await supabase.from('staff_users').select('*').order('created_at', { ascending: true });
-    if (error || !data || data.length === 0) {
-      return [DEFAULT_SUPER_ADMIN];
+    const cloudUsers = (error || !data) ? [] : (data as StaffUser[]);
+    
+    // Ensure default shery is always visible in management list
+    if (!cloudUsers.some((u) => u.username.toLowerCase() === 'shery')) {
+      return [DEFAULT_SUPER_ADMIN, ...cloudUsers];
     }
-    return data as StaffUser[];
+    return cloudUsers;
   },
 
   async add(input: {
@@ -72,6 +75,7 @@ export const staffStorage = {
     const username = input.username.trim();
     if (username.length < 3) return { user: null, error: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل' };
     if (input.password.length < 6) return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
+    if (username.toLowerCase() === 'shery') return { user: null, error: 'اسم المستخدم هذا محجوز' };
 
     const { data, error } = await supabase.from('staff_users').insert([{
       username,
@@ -94,6 +98,10 @@ export const staffStorage = {
     is_active: boolean;
     password: string;
   }): Promise<{ user: StaffUser | null; error: string | null }> {
+    if (input.id === 'super-admin-shery') {
+      return { user: DEFAULT_SUPER_ADMIN, error: null };
+    }
+
     const updateFields: any = {
       display_name: input.display_name,
       role: input.role,
@@ -108,6 +116,7 @@ export const staffStorage = {
   },
 
   async remove(id: string): Promise<{ error: string | null }> {
+    if (id === 'super-admin-shery') return { error: 'لا يمكن حذف حساب المدير الأساسي' };
     const { error } = await supabase.from('staff_users').delete().eq('id', id);
     if (error) return { error: error.message };
     return { error: null };
@@ -141,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
     const cleanUser = username.trim().toLowerCase();
 
-    // Allow default shery login instantly without requiring database table setup
+    // Instant bypass for default shery account
     if (cleanUser === 'shery' && password === 'shery123') {
       saveSession('shery');
       setUser(DEFAULT_SUPER_ADMIN);
