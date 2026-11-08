@@ -84,12 +84,7 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
           </Button>
         </form>
 
-{/* 
-  <div className="text-xs text-slate-400 bg-slate-50 rounded-xl p-3 border border-slate-100">
-    <p className="font-semibold text-slate-500 mb-1">بيانات تجريبية:</p>
-    <p>المستخدم: <span className="font-mono font-bold text-slate-700">shery</span> · كلمة المرور: <span className="font-mono font-bold text-slate-700">shery123</span></p>
-  </div>
-*/}
+
     </Modal>
   );
 }
