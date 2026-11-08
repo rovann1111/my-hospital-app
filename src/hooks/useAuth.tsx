@@ -16,6 +16,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const SESSION_KEY = 'sal_staff_session';
+const CUSTOM_CREDENTIALS_KEY = 'sal_custom_staff_passwords'; // لحفظ أي تعديلات للباسورد من داخل التطبيق أونلاين
 
 function loadSession(): string | null {
   try {
@@ -41,29 +42,80 @@ function clearSession(): void {
   }
 }
 
-// Default fallback super-admin user so shery/shery123 always works instantly
-const DEFAULT_SUPER_ADMIN: StaffUser = {
-  id: 'super-admin-shery',
-  username: 'shery',
-  password: 'shery123',
-  display_name: 'shery (مدير النظام)',
-  role: 'admin',
-  is_super_admin: true,
-  is_active: true,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-};
+// دالة لجلب كلمات المرور المحدثة إذا تم تغييرها من داخل التطبيق
+function getStoredPasswords(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(CUSTOM_CREDENTIALS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+function saveCustomPassword(username: string, newPass: string): void {
+  try {
+    const current = getStoredPasswords();
+    current[username.toLowerCase()] = newPass;
+    localStorage.setItem(CUSTOM_CREDENTIALS_KEY, JSON.stringify(current));
+  } catch {
+    /* ignore */
+  }
+}
+
+// الحسابات الأساسية المطلوبة مع إمكانية تحديث كلمات مرورها من داخل الأبلكيشن
+const DEFAULT_STAFF_USERS: StaffUser[] = [
+  {
+    id: 'super-admin-shery',
+    username: 'shery',
+    password: 'shery123',
+    display_name: 'shery (مدير النظام)',
+    role: 'admin',
+    is_super_admin: true,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'staff-drmarwa',
+    username: 'DRmarwa',
+    password: 'marwa',
+    display_name: 'DRmarwa (طبيبة / مشرف)',
+    role: 'admin',
+    is_super_admin: false,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'staff-dr-elsalam',
+    username: 'dr',
+    password: 'elsalam',
+    display_name: 'dr (استقبال / نظام)',
+    role: 'receptionist',
+    is_super_admin: false,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
 
 export const staffStorage = {
   async list(): Promise<StaffUser[]> {
+    const customPasses = getStoredPasswords();
+    const defaultsWithCustomPasses = DEFAULT_STAFF_USERS.map(u => ({
+      ...u,
+      password: customPasses[u.username.toLowerCase()] || u.password
+    }));
+
     const { data, error } = await supabase.from('staff_users').select('*').order('created_at', { ascending: true });
     const cloudUsers = (error || !data) ? [] : (data as StaffUser[]);
     
-    // Ensure default shery is always visible in management list
-    if (!cloudUsers.some((u) => u.username.toLowerCase() === 'shery')) {
-      return [DEFAULT_SUPER_ADMIN, ...cloudUsers];
-    }
-    return cloudUsers;
+    // دمج الحسابات الافتراضية مع الحسابات السحابية الأخرى وعدم تكرارها
+    const existingUsernames = new Set(cloudUsers.map(u => u.username.toLowerCase()));
+    const filteredDefaults = defaultsWithCustomPasses.filter(u => !existingUsernames.has(u.username.toLowerCase()));
+    
+    return [...filteredDefaults, ...cloudUsers];
   },
 
   async add(input: {
@@ -75,7 +127,11 @@ export const staffStorage = {
     const username = input.username.trim();
     if (username.length < 3) return { user: null, error: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل' };
     if (input.password.length < 6) return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
-    if (username.toLowerCase() === 'shery') return { user: null, error: 'اسم المستخدم هذا محجوز' };
+
+    const lower = username.toLowerCase();
+    if (['shery', 'drmarwa', 'dr'].includes(lower)) {
+      return { user: null, error: 'اسم المستخدم هذا محجوز للحسابات الأساسية' };
+    }
 
     const { data, error } = await supabase.from('staff_users').insert([{
       username,
@@ -98,8 +154,22 @@ export const staffStorage = {
     is_active: boolean;
     password: string;
   }): Promise<{ user: StaffUser | null; error: string | null }> {
-    if (input.id === 'super-admin-shery') {
-      return { user: DEFAULT_SUPER_ADMIN, error: null };
+    // التحقق إذا كان التعديل يخص أحد الحسابات الأساسية الثابتة
+    const targetDefault = DEFAULT_STAFF_USERS.find(u => u.id === input.id || u.username.toLowerCase() === input.id.toLowerCase());
+    if (targetDefault) {
+      if (input.password) {
+        if (input.password.length < 6) {
+          return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
+        }
+        saveCustomPassword(targetDefault.username, input.password);
+      }
+      const updatedUser: StaffUser = {
+        ...targetDefault,
+        display_name: input.display_name,
+        password: input.password ? input.password : targetDefault.password,
+        updated_at: new Date().toISOString(),
+      };
+      return { user: updatedUser, error: null };
     }
 
     const updateFields: any = {
@@ -108,7 +178,10 @@ export const staffStorage = {
       is_active: input.is_active,
       updated_at: new Date().toISOString(),
     };
-    if (input.password) updateFields.password = input.password;
+    if (input.password) {
+      if (input.password.length < 6) return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
+      updateFields.password = input.password;
+    }
 
     const { data, error } = await supabase.from('staff_users').update(updateFields).eq('id', input.id).select().single();
     if (error || !data) return { user: null, error: error?.message || 'فشل التعديل' };
@@ -116,7 +189,9 @@ export const staffStorage = {
   },
 
   async remove(id: string): Promise<{ error: string | null }> {
-    if (id === 'super-admin-shery') return { error: 'لا يمكن حذف حساب المدير الأساسي' };
+    if (['super-admin-shery', 'staff-drmarwa', 'staff-dr-elsalam'].includes(id)) {
+      return { error: 'لا يمكن حذف الحسابات الأساسية للنظام' };
+    }
     const { error } = await supabase.from('staff_users').delete().eq('id', id);
     if (error) return { error: error.message };
     return { error: null };
@@ -131,8 +206,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function initSession() {
       const username = loadSession();
       if (username) {
-        if (username.toLowerCase() === 'shery') {
-          setUser(DEFAULT_SUPER_ADMIN);
+        const lower = username.toLowerCase();
+        const foundDefault = DEFAULT_STAFF_USERS.find(u => u.username.toLowerCase() === lower);
+        if (foundDefault) {
+          const customPasses = getStoredPasswords();
+          setUser({
+            ...foundDefault,
+            password: customPasses[foundDefault.username.toLowerCase()] || foundDefault.password
+          });
         } else {
           const { data } = await supabase.from('staff_users').select('*').eq('username', username).single();
           if (data && data.is_active) {
@@ -149,14 +230,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
     const cleanUser = username.trim().toLowerCase();
+    const customPasses = getStoredPasswords();
 
-    // Instant bypass for default shery account
-    if (cleanUser === 'shery' && password === 'shery123') {
-      saveSession('shery');
-      setUser(DEFAULT_SUPER_ADMIN);
-      return { success: true, user: DEFAULT_SUPER_ADMIN };
+    // التحقق من الحسابات الثلاثة الأساسية فوراً
+    const matchedDefault = DEFAULT_STAFF_USERS.find(u => u.username.toLowerCase() === cleanUser);
+    if (matchedDefault) {
+      const activePass = customPasses[matchedDefault.username.toLowerCase()] || matchedDefault.password;
+      if (password === activePass) {
+        const loggedUser = { ...matchedDefault, password: activePass };
+        saveSession(matchedDefault.username);
+        setUser(loggedUser);
+        return { success: true, user: loggedUser };
+      } else {
+        return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+      }
     }
 
+    // التحقق من باقي المستخدمين السحابيين
     const { data, error } = await supabase.from('staff_users').select('*').eq('username', cleanUser).single();
     
     if (error || !data || data.password !== password) {
