@@ -84,7 +84,6 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
           </Button>
         </form>
 
-
     </Modal>
   );
 }
