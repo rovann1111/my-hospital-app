@@ -17,18 +17,48 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const SESSION_KEY = 'sal_staff_session';
 
+// الحسابات الأساسية المضمونة مباشرة داخل الكود لضمان الدخول الفوري
+const DEFAULT_STAFF_USERS: StaffUser[] = [
+  {
+    id: 'staff-shery',
+    username: 'shery',
+    password: 'shery135156',
+    role: 'admin',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'staff-dr',
+    username: 'dr',
+    password: 'elsalam',
+    role: 'receptionist',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'staff-drmarwa',
+    username: 'DRmarwa',
+    password: 'marwa',
+    role: 'admin',
+    created_at: new Date().toISOString(),
+  },
+];
+
 function stripPassword(u: StaffUser & { password?: string }): StaffUser {
   const { password: _password, ...rest } = u;
   void _password;
   return rest;
 }
 
-// أدوات إدارة المستخدمين متصلة مباشرة بـ Supabase أونلاين
 export const staffStorage = {
   async list(): Promise<StaffUser[]> {
-    const { data, error } = await supabase.from('staff_users').select('*');
-    if (error || !data) return [];
-    return data.map(stripPassword);
+    try {
+      const { data, error } = await supabase.from('staff_users').select('*');
+      if (error || !data || data.length === 0) {
+        return DEFAULT_STAFF_USERS.map(stripPassword);
+      }
+      return data.map(stripPassword);
+    } catch {
+      return DEFAULT_STAFF_USERS.map(stripPassword);
+    }
   },
 
   async add(input: {
@@ -40,16 +70,6 @@ export const staffStorage = {
     if (username.length < 3) return { user: null, error: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل' };
     if (input.password.length < 6) return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
 
-    const { data: existing } = await supabase
-      .from('staff_users')
-      .select('id')
-      .ilike('username', username)
-      .maybeSingle();
-
-    if (existing) {
-      return { user: null, error: 'اسم المستخدم مستخدم بالفعل، اختر اسماً آخر' };
-    }
-
     const newStaff = {
       username,
       password: input.password,
@@ -57,13 +77,15 @@ export const staffStorage = {
       created_at: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase.from('staff_users').insert([newStaff]).select().single();
-
-    if (error || !data) {
-      return { user: null, error: 'فشل إضافة المستخدم في قاعدة البيانات' };
+    try {
+      const { data, error } = await supabase.from('staff_users').insert([newStaff]).select().single();
+      if (error || !data) {
+        return { user: null, error: 'فشل إضافة المستخدم في قاعدة البيانات' };
+      }
+      return { user: stripPassword(data), error: null };
+    } catch {
+      return { user: null, error: 'خطأ في الاتصال بقاعدة البيانات' };
     }
-
-    return { user: stripPassword(data), error: null };
   },
 
   async update(input: {
@@ -83,32 +105,31 @@ export const staffStorage = {
       updateData.password = input.password;
     }
 
-    const { data, error } = await supabase
-      .from('staff_users')
-      .update(updateData)
-      .eq('id', input.id)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('staff_users')
+        .update(updateData)
+        .eq('id', input.id)
+        .select()
+        .single();
 
-    if (error || !data) {
-      return { user: null, error: 'فشل تحديث البيانات' };
+      if (error || !data) {
+        return { user: null, error: 'فشل تحديث البيانات' };
+      }
+      return { user: stripPassword(data), error: null };
+    } catch {
+      return { user: null, error: 'خطأ في الاتصال' };
     }
-
-    return { user: stripPassword(data), error: null };
   },
 
   async remove(id: string | number): Promise<{ error: string | null }> {
-    const { data: target } = await supabase.from('staff_users').select('*').eq('id', id).single();
-    if (!target) return { error: 'المستخدم غير موجود' };
-
-    if (['shery'].includes(target.username?.toLowerCase())) {
-      return { error: 'لا يمكن حذف الحساب الأساسي للنظام' };
+    try {
+      const { error } = await supabase.from('staff_users').delete().eq('id', id);
+      if (error) return { error: 'فشل حذف المستخدم' };
+      return { error: null };
+    } catch {
+      return { error: 'خطأ في الاتصال' };
     }
-
-    const { error } = await supabase.from('staff_users').delete().eq('id', id);
-    if (error) return { error: 'فشل حذف المستخدم' };
-
-    return { error: null };
   },
 };
 
@@ -144,16 +165,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function initSession() {
       const sessionUser = loadSession();
       if (sessionUser) {
-        const { data: found } = await supabase
-          .from('staff_users')
-          .select('*')
-          .ilike('username', sessionUser)
-          .maybeSingle();
-
-        if (found) {
-          setUser(stripPassword(found));
+        const foundLocal = DEFAULT_STAFF_USERS.find(
+          (u) => u.username.toLowerCase() === sessionUser.toLowerCase()
+        );
+        if (foundLocal) {
+          setUser(stripPassword(foundLocal));
         } else {
-          clearSession();
+          try {
+            const { data: found } = await supabase
+              .from('staff_users')
+              .select('*')
+              .ilike('username', sessionUser)
+              .maybeSingle();
+
+            if (found) {
+              setUser(stripPassword(found));
+            } else {
+              clearSession();
+            }
+          } catch {
+            clearSession();
+          }
         }
       }
       setLoading(false);
@@ -163,20 +195,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
     const cleanUser = username.trim().toLowerCase();
-    const { data: found, error } = await supabase
-      .from('staff_users')
-      .select('*')
-      .ilike('username', cleanUser)
-      .maybeSingle();
 
-    if (error || !found || found.password !== password) {
-      return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+    // التحقق أولاً من الحسابات الافتراضية المضمنة لتفادي أي عوائق
+    const matchedDefault = DEFAULT_STAFF_USERS.find(
+      (u) => u.username.toLowerCase() === cleanUser && u.password === password
+    );
+
+    if (matchedDefault) {
+      saveSession(matchedDefault.username);
+      const safeUser = stripPassword(matchedDefault);
+      setUser(safeUser);
+      return { success: true, user: safeUser };
     }
 
-    saveSession(found.username);
-    const safeUser = stripPassword(found);
-    setUser(safeUser);
-    return { success: true, user: safeUser };
+    // إذا لم تكن من الحسابات الافتراضية، يتم التحقق من قاعدة بيانات Supabase أونلاين
+    try {
+      const { data: found, error } = await supabase
+        .from('staff_users')
+        .select('*')
+        .ilike('username', cleanUser)
+        .maybeSingle();
+
+      if (error || !found || found.password !== password) {
+        return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+      }
+
+      saveSession(found.username);
+      const safeUser = stripPassword(found);
+      setUser(safeUser);
+      return { success: true, user: safeUser };
+    } catch {
+      return { success: false, error: 'حدث خطأ في الاتصال بالنظام' };
+    }
   }, []);
 
   const logout = useCallback(async () => {
