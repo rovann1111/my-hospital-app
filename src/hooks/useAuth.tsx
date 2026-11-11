@@ -40,7 +40,6 @@ export const staffStorage = {
     if (username.length < 3) return { user: null, error: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل' };
     if (input.password.length < 6) return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
 
-    // التحقق من تكرار اسم المستخدم أونلاين
     const { data: existing } = await supabase
       .from('staff_users')
       .select('id')
@@ -68,16 +67,13 @@ export const staffStorage = {
   },
 
   async update(input: {
-    id: string;
+    id: string | number;
     role: StaffUser['role'];
     password: string;
   }): Promise<{ user: StaffUser | null; error: string | null }> {
     if (input.password && input.password.length < 6) {
       return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
     }
-
-    const { data: target } = await supabase.from('staff_users').select('*').eq('id', input.id).single();
-    if (!target) return { user: null, error: 'المستخدم غير موجود' };
 
     const updateData: Record<string, any> = {
       role: input.role,
@@ -101,11 +97,11 @@ export const staffStorage = {
     return { user: stripPassword(data), error: null };
   },
 
-  async remove(id: string): Promise<{ error: string | null }> {
+  async remove(id: string | number): Promise<{ error: string | null }> {
     const { data: target } = await supabase.from('staff_users').select('*').eq('id', id).single();
     if (!target) return { error: 'المستخدم غير موجود' };
 
-    if (['shery'].includes(target.username.toLowerCase())) {
+    if (['shery'].includes(target.username?.toLowerCase())) {
       return { error: 'لا يمكن حذف الحساب الأساسي للنظام' };
     }
 
