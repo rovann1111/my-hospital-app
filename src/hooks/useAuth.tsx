@@ -34,7 +34,6 @@ export const staffStorage = {
   async add(input: {
     username: string;
     password: string;
-    display_name: string;
     role: StaffUser['role'];
   }): Promise<{ user: StaffUser | null; error: string | null }> {
     const username = input.username.trim();
@@ -55,12 +54,8 @@ export const staffStorage = {
     const newStaff = {
       username,
       password: input.password,
-      display_name: input.display_name,
       role: input.role,
-      is_super_admin: false,
-      is_active: true,
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     };
 
     const { data, error } = await supabase.from('staff_users').insert([newStaff]).select().single();
@@ -74,24 +69,18 @@ export const staffStorage = {
 
   async update(input: {
     id: string;
-    display_name: string;
     role: StaffUser['role'];
-    is_active: boolean;
     password: string;
   }): Promise<{ user: StaffUser | null; error: string | null }> {
     if (input.password && input.password.length < 6) {
       return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
     }
 
-    // جلب المستخدم الحالي أولاً للتأكد من صلاحياته
     const { data: target } = await supabase.from('staff_users').select('*').eq('id', input.id).single();
     if (!target) return { user: null, error: 'المستخدم غير موجود' };
 
     const updateData: Record<string, any> = {
-      display_name: input.display_name,
-      role: target.is_super_admin ? target.role : input.role,
-      is_active: target.is_super_admin ? true : input.is_active,
-      updated_at: new Date().toISOString(),
+      role: input.role,
     };
 
     if (input.password) {
@@ -116,8 +105,8 @@ export const staffStorage = {
     const { data: target } = await supabase.from('staff_users').select('*').eq('id', id).single();
     if (!target) return { error: 'المستخدم غير موجود' };
 
-    if (target.is_super_admin || ['shery', 'drmarwa', 'dr'].includes(target.username.toLowerCase())) {
-      return { error: 'لا يمكن حذف الحسابات الأساسية للنظام' };
+    if (['shery'].includes(target.username.toLowerCase())) {
+      return { error: 'لا يمكن حذف الحساب الأساسي للنظام' };
     }
 
     const { error } = await supabase.from('staff_users').delete().eq('id', id);
@@ -165,7 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .ilike('username', sessionUser)
           .maybeSingle();
 
-        if (found && found.is_active) {
+        if (found) {
           setUser(stripPassword(found));
         } else {
           clearSession();
@@ -186,9 +175,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (error || !found || found.password !== password) {
       return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
-    }
-    if (!found.is_active) {
-      return { success: false, error: 'هذا الحساب معطّل. تواصل مع المدير' };
     }
 
     saveSession(found.username);
