@@ -48,7 +48,7 @@ const DEFAULT_STAFF_USERS: StaffUser[] = [
 
     username: 'shery',
 
-    password: 'shery123',
+    password: 'shery135156',
 
     display_name: 'shery (مدير النظام)',
 
