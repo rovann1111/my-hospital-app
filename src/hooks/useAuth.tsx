@@ -16,116 +16,43 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const SESSION_KEY = 'sal_staff_session';
-const USERS_KEY = 'sal_staff_users_v2';
 
-// الحسابات الأساسية الثابتة
-const DEFAULT_STAFF_USERS: StaffUser[] = [
-  {
-    id: 'super-admin-shery',
-    username: 'shery',
-    password: 'shery123',
-    display_name: 'shery (مدير النظام)',
-    role: 'admin',
-    is_super_admin: true,
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'staff-drmarwa',
-    username: 'DRmarwa',
-    password: 'marwa',
-    display_name: 'DRmarwa (طبيبة / مشرف)',
-    role: 'admin',
-    is_super_admin: false,
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'staff-dr-elsalam',
-    username: 'dr',
-    password: 'elsalam',
-    display_name: 'dr (استقبال / نظام)',
-    role: 'receptionist',
-    is_super_admin: false,
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
-type StoredStaffUser = StaffUser & { password: string };
-
-function loadStoredUsers(): StoredStaffUser[] {
-  try {
-    const raw = localStorage.getItem(USERS_KEY);
-    if (!raw) {
-      const initial: StoredStaffUser[] = DEFAULT_STAFF_USERS;
-      localStorage.setItem(USERS_KEY, JSON.stringify(initial));
-      return initial;
-    }
-    const parsed = JSON.parse(raw) as StoredStaffUser[];
-    if (!Array.isArray(parsed)) return DEFAULT_STAFF_USERS;
-    
-    // تأكد من وجود الحسابات الأساسية الثلاثة دائماً
-    let updated = [...parsed];
-    for (const def of DEFAULT_STAFF_USERS) {
-      const idx = updated.findIndex(u => u.username.toLowerCase() === def.username.toLowerCase());
-      if (idx === -1) {
-        updated.push(def);
-      } else {
-        // الحفاظ على الباسورد المحدث لو المستخدم غيره
-        updated[idx] = {
-          ...def,
-          password: updated[idx].password || def.password,
-          display_name: updated[idx].display_name || def.display_name,
-        };
-      }
-    }
-    return updated;
-  } catch {
-    return DEFAULT_STAFF_USERS;
-  }
-}
-
-function saveStoredUsers(users: StoredStaffUser[]): void {
-  try {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  } catch {
-    /* ignore */
-  }
-}
-
-function stripPassword(u: StoredStaffUser): StaffUser {
+function stripPassword(u: StaffUser & { password?: string }): StaffUser {
   const { password: _password, ...rest } = u;
   void _password;
   return rest;
 }
 
-// أدوات إدارة المستخدمين متوافقة تماماً وبدون تعليق مع الشاشة
+// أدوات إدارة المستخدمين متصلة مباشرة بـ Supabase
 export const staffStorage = {
-  list(): StaffUser[] {
-    return loadStoredUsers().map(stripPassword);
+  async list(): Promise<StaffUser[]> {
+    const { data, error } = await supabase.from('staff_users').select('*');
+    if (error || !data) return [];
+    return data.map(stripPassword);
   },
 
-  add(input: {
+  async add(input: {
     username: string;
     password: string;
     display_name: string;
     role: StaffUser['role'];
-  }): { user: StaffUser | null; error: string | null } {
-    const users = loadStoredUsers();
+  }): Promise<{ user: StaffUser | null; error: string | null }> {
     const username = input.username.trim();
     if (username.length < 3) return { user: null, error: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل' };
     if (input.password.length < 6) return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
-    
-    if (users.some((u) => u.username.toLowerCase() === username.toLowerCase())) {
+
+    // التحقق من تكرار اسم المستخدم
+    const { data: existing } = await supabase
+      .from('staff_users')
+      .select('id')
+      .ilike('username', username)
+      .maybeSingle();
+
+    if (existing) {
       return { user: null, error: 'اسم المستخدم مستخدم بالفعل، اختر اسماً آخر' };
     }
 
-    const newUser: StoredStaffUser = {
-      id: crypto.randomUUID(),
+    const newStaff = {
       username,
       password: input.password,
       display_name: input.display_name,
@@ -136,50 +63,66 @@ export const staffStorage = {
       updated_at: new Date().toISOString(),
     };
 
-    saveStoredUsers([...users, newUser]);
-    return { user: stripPassword(newUser), error: null };
+    const { data, error } = await supabase.from('staff_users').insert([newStaff]).select().single();
+
+    if (error || !data) {
+      return { user: null, error: 'فشل إضافة المستخدم في قاعدة البيانات' };
+    }
+
+    return { user: stripPassword(data), error: null };
   },
 
-  update(input: {
+  async update(input: {
     id: string;
     display_name: string;
     role: StaffUser['role'];
     is_active: boolean;
     password: string;
-  }): { user: StaffUser | null; error: string | null } {
-    const users = loadStoredUsers();
-    const idx = users.findIndex((u) => u.id === input.id);
-    if (idx === -1) return { user: null, error: 'المستخدم غير موجود' };
-    
-    const target = users[idx];
+  }): Promise<{ user: StaffUser | null; error: string | null }> {
     if (input.password && input.password.length < 6) {
       return { user: null, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' };
     }
 
-    const updated: StoredStaffUser = {
-      ...target,
+    // جلب المستخدم الحالي أولاً للتأكد من صلاحياته
+    const { data: target } = await supabase.from('staff_users').select('*').eq('id', input.id).single();
+    if (!target) return { user: null, error: 'المستخدم غير موجود' };
+
+    const updateData: Record<string, any> = {
       display_name: input.display_name,
       role: target.is_super_admin ? target.role : input.role,
       is_active: target.is_super_admin ? true : input.is_active,
-      password: input.password ? input.password : target.password,
       updated_at: new Date().toISOString(),
     };
 
-    const next = [...users];
-    next[idx] = updated;
-    saveStoredUsers(next);
-    return { user: stripPassword(updated), error: null };
+    if (input.password) {
+      updateData.password = input.password;
+    }
+
+    const { data, error } = await supabase
+      .from('staff_users')
+      .update(updateData)
+      .eq('id', input.id)
+      .select()
+      .single();
+
+    if (error || !data) {
+      return { user: null, error: 'فشل تحديث البيانات' };
+    }
+
+    return { user: stripPassword(data), error: null };
   },
 
-  remove(id: string): { error: string | null } {
-    const users = loadStoredUsers();
-    const target = users.find((u) => u.id === id);
+  async remove(id: string): Promise<{ error: string | null }> {
+    const { data: target } = await supabase.from('staff_users').select('*').eq('id', id).single();
     if (!target) return { error: 'المستخدم غير موجود' };
+
     if (target.is_super_admin || ['shery', 'drmarwa', 'dr'].includes(target.username.toLowerCase())) {
       return { error: 'لا يمكن حذف الحسابات الأساسية للنظام' };
     }
 
-    saveStoredUsers(users.filter((u) => u.id !== id));
+    const { error } = await supabase.from('staff_users').delete().eq('id', id);
+    if (error) return { error: 'فشل حذف المستخدم' };
+
     return { error: null };
   },
 };
@@ -213,25 +156,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const sessionUser = loadSession();
-    if (sessionUser) {
-      const users = loadStoredUsers();
-      const found = users.find((u) => u.username.toLowerCase() === sessionUser.toLowerCase() && u.is_active);
-      if (found) {
-        setUser(stripPassword(found));
-      } else {
-        clearSession();
+    async function initSession() {
+      const sessionUser = loadSession();
+      if (sessionUser) {
+        const { data: found } = await supabase
+          .from('staff_users')
+          .select('*')
+          .ilike('username', sessionUser)
+          .maybeSingle();
+
+        if (found && found.is_active) {
+          setUser(stripPassword(found));
+        } else {
+          clearSession();
+        }
       }
+      setLoading(false);
     }
-    setLoading(false);
+    initSession();
   }, []);
 
   const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
-    const users = loadStoredUsers();
     const cleanUser = username.trim().toLowerCase();
-    const found = users.find((u) => u.username.toLowerCase() === cleanUser);
+    const { data: found, error } = await supabase
+      .from('staff_users')
+      .select('*')
+      .ilike('username', cleanUser)
+      .maybeSingle();
 
-    if (!found || found.password !== password) {
+    if (error || !found || found.password !== password) {
       return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
     }
     if (!found.is_active) {
