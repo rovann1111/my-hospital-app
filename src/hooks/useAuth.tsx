@@ -17,7 +17,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const SESSION_KEY = 'sal_staff_session';
 
-// الحسابات الأساسية المضمونة مباشرة داخل الكود لضمان الدخول الفوري
+// الحسابات الأساسية الثابتة للطوارئ لضمان عدم ضياع الدخول أبداً
 const DEFAULT_STAFF_USERS: StaffUser[] = [
   {
     id: 'staff-shery',
@@ -49,18 +49,26 @@ function stripPassword(u: StaffUser & { password?: string }): StaffUser {
 }
 
 export const staffStorage = {
+  // جلب كافة المستخدمين (دمج الأساسيين من الكود مع المضافين من Supabase بدون تكرار وتحديث فوري)
   async list(): Promise<StaffUser[]> {
     try {
-      const { data, error } = await supabase.from('staff_users').select('*');
-      if (error || !data || data.length === 0) {
-        return DEFAULT_STAFF_USERS.map(stripPassword);
-      }
-      return data.map(stripPassword);
+      const { data, error } = await supabase.from('staff_users').select('*').order('created_at', { ascending: true });
+      const remoteUsers = error || !data ? [] : data;
+
+      // دمج الحسابات الافتراضية مع الحسابات القادمة من Supabase مع منع تكرار اسم المستخدم
+      const remoteUsernames = new Set(remoteUsers.map((u: StaffUser) => u.username.toLowerCase()));
+      const filteredDefaults = DEFAULT_STAFF_USERS.filter(
+        (u) => !remoteUsernames.has(u.username.toLowerCase())
+      );
+
+      const combined = [...filteredDefaults, ...remoteUsers];
+      return combined.map(stripPassword);
     } catch {
       return DEFAULT_STAFF_USERS.map(stripPassword);
     }
   },
 
+  // إضافة مستخدم جديد من داخل السايت وحفظه مباشرة في Supabase ليظهر للجميع فوراً
   async add(input: {
     username: string;
     password: string;
@@ -88,6 +96,7 @@ export const staffStorage = {
     }
   },
 
+  // تحديث بيانات المستخدم (الباسورد أو الصلاحية) وتحديثها مباشرة على السيرفر
   async update(input: {
     id: string | number;
     role: StaffUser['role'];
@@ -114,7 +123,7 @@ export const staffStorage = {
         .single();
 
       if (error || !data) {
-        return { user: null, error: 'فشل تحديث البيانات' };
+        return { user: null, error: 'فشل تحديث البيانات في قاعدة البيانات' };
       }
       return { user: stripPassword(data), error: null };
     } catch {
@@ -122,6 +131,7 @@ export const staffStorage = {
     }
   },
 
+  // حذف المستخدم من Supabase
   async remove(id: string | number): Promise<{ error: string | null }> {
     try {
       const { error } = await supabase.from('staff_users').delete().eq('id', id);
@@ -165,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function initSession() {
       const sessionUser = loadSession();
       if (sessionUser) {
+        // التحقق أولاً من الحسابات الافتراضية
         const foundLocal = DEFAULT_STAFF_USERS.find(
           (u) => u.username.toLowerCase() === sessionUser.toLowerCase()
         );
@@ -196,7 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
     const cleanUser = username.trim().toLowerCase();
 
-    // التحقق أولاً من الحسابات الافتراضية المضمنة لتفادي أي عوائق
+    // 1. التحقق من الحسابات الثابتة في الكود
     const matchedDefault = DEFAULT_STAFF_USERS.find(
       (u) => u.username.toLowerCase() === cleanUser && u.password === password
     );
@@ -208,7 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true, user: safeUser };
     }
 
-    // إذا لم تكن من الحسابات الافتراضية، يتم التحقق من قاعدة بيانات Supabase أونلاين
+    // 2. التحقق من المستخدمين المضافين عبر الموقع في قاعدة بيانات Supabase
     try {
       const { data: found, error } = await supabase
         .from('staff_users')
